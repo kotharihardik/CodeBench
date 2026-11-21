@@ -4,73 +4,33 @@ const {
   submissionsListCacheTtlMs,
   questionTopicsCacheTtlMs
 } = require("./config");
+const MultiTierCache = require("./cache/multiTierCache");
 
-const cache = new Map();
+const multiTierCache = new MultiTierCache({
+  name: "summaries",
+  maxL1Entries: summaryCacheMaxEntries,
+  defaultL1TtlMs: summaryCacheTtlMs,
+  defaultL2TtlSec: Math.ceil(summaryCacheTtlMs / 1000)
+});
 
-function nowMs() {
-  return Date.now();
-}
+// Single cache store: L1 (per-process Map) + L2 (Redis) with a pub/sub invalidation bus.
+// Reads check L1 then L2; invalidations evict L1 on every API/worker instance.
 
-function pruneExpired() {
-  const current = nowMs();
-  for (const [key, value] of cache.entries()) {
-    if (!value || Number(value.expiresAt || 0) <= current) {
-      cache.delete(key);
-    }
-  }
-}
-
-function trimToMaxEntries() {
-  const safeMax = Math.max(100, Number(summaryCacheMaxEntries || 2000));
-  if (cache.size <= safeMax) {
-    return;
-  }
-
-  const toRemove = cache.size - safeMax;
-  let removed = 0;
-  for (const key of cache.keys()) {
-    cache.delete(key);
-    removed += 1;
-    if (removed >= toRemove) {
-      break;
-    }
-  }
-}
-
-function getCached(key) {
-  pruneExpired();
-
-  const hit = cache.get(String(key));
-  if (!hit) {
-    return null;
-  }
-
-  if (hit.expiresAt <= nowMs()) {
-    cache.delete(String(key));
-    return null;
-  }
-
-  return hit.value;
+async function getCached(key) {
+  const read = await multiTierCache.get(String(key));
+  return read.value;
 }
 
 function setCached(key, value, ttlMs = summaryCacheTtlMs) {
-  pruneExpired();
-
-  cache.set(String(key), {
-    value,
-    expiresAt: nowMs() + Number(ttlMs || summaryCacheTtlMs)
+  const safeTtl = Number(ttlMs || summaryCacheTtlMs);
+  return multiTierCache.set(String(key), value, {
+    l1TtlMs: safeTtl,
+    l2TtlSec: Math.max(1, Math.ceil(safeTtl / 1000))
   });
-
-  trimToMaxEntries();
 }
 
 function clearByPrefix(prefix) {
-  const cleanPrefix = String(prefix || "");
-  for (const key of cache.keys()) {
-    if (key.startsWith(cleanPrefix)) {
-      cache.delete(key);
-    }
-  }
+  return multiTierCache.invalidatePrefix(String(prefix || ""));
 }
 
 function buildSubmissionScope(role, userId) {
@@ -99,16 +59,18 @@ function questionTopicsCacheKey({ role, includeInactive }) {
 }
 
 function invalidateSubmissionListCacheForUser(userId) {
-  clearByPrefix("submissions:list:admin:");
-  clearByPrefix(`submissions:list:user:${String(userId || "")}:`);
+  return Promise.all([
+    clearByPrefix("submissions:list:admin:"),
+    clearByPrefix(`submissions:list:user:${String(userId || "")}:`)
+  ]);
 }
 
 function invalidateSubmissionListCacheAll() {
-  clearByPrefix("submissions:list:");
+  return clearByPrefix("submissions:list:");
 }
 
 function invalidateQuestionTopicsCache() {
-  clearByPrefix("questions:topics:");
+  return clearByPrefix("questions:topics:");
 }
 
 function cacheTtlMs() {
@@ -127,11 +89,15 @@ function adminOverviewKey() {
 }
 
 function invalidateStudentSummary(userId) {
-  cache.delete(studentSummaryKey(userId));
+  return multiTierCache.invalidate(studentSummaryKey(userId));
 }
 
 function invalidateAdminOverview() {
-  cache.delete(adminOverviewKey());
+  return multiTierCache.invalidate(adminOverviewKey());
+}
+
+function getMultiTierCacheMetrics() {
+  return multiTierCache.getMetrics();
 }
 
 module.exports = {
@@ -147,5 +113,6 @@ module.exports = {
   invalidateAdminOverview,
   invalidateSubmissionListCacheForUser,
   invalidateSubmissionListCacheAll,
-  invalidateQuestionTopicsCache
+  invalidateQuestionTopicsCache,
+  getMultiTierCacheMetrics
 };
