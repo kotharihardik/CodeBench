@@ -9,6 +9,8 @@ const testRoutes = require("./tests/tests.routes");
 const submissionRoutes = require("./submissions/submissions.routes");
 const analyticsRoutes = require("./analytics/analytics.routes");
 const monitorRoutes = require("./monitor/monitor.routes");
+const leaderboardRoutes = require("./leaderboard/leaderboard.routes");
+const plagiarismRoutes = require("./plagiarism/plagiarism.routes");
 const redisConnection = require("./shared/redis");
 const requireAuth = require("./shared/middleware/requireAuth");
 const { recordApiLatency } = require("./shared/runtimeMetrics");
@@ -174,6 +176,8 @@ app.use("/api/tests", testRoutes);
 app.use("/api/submissions", submissionRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/monitor", monitorRoutes);
+app.use("/api/leaderboard", leaderboardRoutes);
+app.use("/api/plagiarism", plagiarismRoutes);
 
 app.use("/api", (req, res) => {
   res.status(404).json({ error: "Route not found" });

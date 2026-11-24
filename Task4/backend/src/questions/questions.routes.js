@@ -93,7 +93,7 @@ router.get("/topics", requireAuth, async (req, res) => {
       includeInactive
     });
 
-    const cached = getCached(cacheKey);
+    const cached = await getCached(cacheKey);
     if (cached) {
       res.setHeader("x-read-cache", "hit");
       return res.json(cached);
@@ -150,7 +150,7 @@ router.post("/", requireAuth, requireRole("admin"), async (req, res) => {
       createdBy: req.user.userId
     });
 
-    invalidateQuestionTopicsCache();
+    await invalidateQuestionTopicsCache();
 
     return res.status(201).json({ question });
   } catch (err) {
@@ -172,7 +172,7 @@ router.put("/:id", requireAuth, requireRole("admin"), async (req, res) => {
       return res.status(404).json({ error: "Question not found" });
     }
 
-    invalidateQuestionTopicsCache();
+    await invalidateQuestionTopicsCache();
 
     return res.json({ question });
   } catch (err) {
@@ -188,7 +188,7 @@ router.delete("/:id/permanent", requireAuth, requireRole("admin"), async (req, r
       return res.status(404).json({ error: "Question not found" });
     }
 
-    invalidateQuestionTopicsCache();
+    await invalidateQuestionTopicsCache();
 
     return res.json({ message: "Question permanently deleted" });
   } catch (err) {
@@ -208,7 +208,7 @@ router.delete("/:id", requireAuth, requireRole("admin"), async (req, res) => {
       return res.status(404).json({ error: "Question not found" });
     }
 
-    invalidateQuestionTopicsCache();
+    await invalidateQuestionTopicsCache();
 
     return res.json({ message: "Question deactivated" });
   } catch (err) {

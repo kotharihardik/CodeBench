@@ -1,5 +1,14 @@
 const { spawn } = require("child_process");
 const { dockerTimeoutSec, dockerPullTimeoutSec } = require("../shared/config");
+const { CircuitBreaker } = require("../shared/circuitBreaker");
+
+const dockerCircuitBreaker = new CircuitBreaker("docker-sandbox", {
+  failureThreshold: 5,
+  recoveryTimeoutMs: 20000,
+  successThreshold: 2,
+  // A user's infinite loop timing out is a verdict (TLE), not a sandbox outage.
+  isFailure: (err) => !(err && err.isUserCodeTimeout)
+});
 
 const languageProfiles = {
   javascript: {
@@ -103,7 +112,7 @@ async function prePullDockerImages() {
   }
 }
 
-function runCodeInDocker(language, code, input = "") {
+function executeDockerSandbox(language, code, input = "") {
   const profile = languageProfiles[String(language || "").toLowerCase()];
 
   if (!profile) {
@@ -112,10 +121,13 @@ function runCodeInDocker(language, code, input = "") {
 
   const codeB64 = Buffer.from(String(code || ""), "utf8").toString("base64");
   const inputB64 = Buffer.from(String(input || ""), "utf8").toString("base64");
+  const containerName = `sandbox-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 
   return new Promise((resolve, reject) => {
     const args = [
       "run",
+      "--name",
+      containerName,
       "--rm",
       "--network",
       "none",
@@ -123,6 +135,10 @@ function runCodeInDocker(language, code, input = "") {
       "1",
       "--memory",
       "256m",
+      "--pids-limit",
+      "64",
+      "--tmpfs",
+      "/tmp:rw,nosuid,size=32m",
       "-e",
       `CODE_B64=${codeB64}`,
       "-e",
@@ -145,8 +161,14 @@ function runCodeInDocker(language, code, input = "") {
       }
 
       finished = true;
+      // Explicitly kill the container by name so dockerd frees orphaned resources
+      try {
+        spawn("docker", ["kill", containerName], { windowsHide: true });
+      } catch (_) {}
       child.kill("SIGKILL");
-      reject(new Error("Docker execution timed out"));
+      const timeoutError = new Error("Docker execution timed out");
+      timeoutError.isUserCodeTimeout = true;
+      reject(timeoutError);
     }, dockerTimeoutSec * 1000);
 
     child.stdout.on("data", (chunk) => {
@@ -184,8 +206,17 @@ function runCodeInDocker(language, code, input = "") {
   });
 }
 
+function runCodeInDocker(language, code, input = "") {
+  return dockerCircuitBreaker.execute(() => executeDockerSandbox(language, code, input));
+}
+
+function getDockerCircuitBreakerStatus() {
+  return dockerCircuitBreaker.getStatus();
+}
+
 module.exports = {
   runCodeInDocker,
   prePullDockerImages,
-  getSupportedDockerImages
+  getSupportedDockerImages,
+  getDockerCircuitBreakerStatus
 };

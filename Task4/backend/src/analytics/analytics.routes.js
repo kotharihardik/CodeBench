@@ -20,7 +20,7 @@ router.get("/student/summary", requireAuth, async (req, res) => {
       req.user.role === "admin" && req.query.userId ? req.query.userId : req.user.userId;
 
     const cacheKey = studentSummaryKey(targetUserId);
-    const cached = getCached(cacheKey);
+    const cached = await getCached(cacheKey);
     if (cached) {
       return res.json(cached);
     }
@@ -100,7 +100,7 @@ router.get("/student/summary", requireAuth, async (req, res) => {
 router.get("/admin/overview", requireAuth, requireRole("admin"), async (req, res) => {
   try {
     const cacheKey = adminOverviewKey();
-    const cached = getCached(cacheKey);
+    const cached = await getCached(cacheKey);
     if (cached) {
       return res.json(cached);
     }

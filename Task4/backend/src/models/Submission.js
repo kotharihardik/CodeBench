@@ -38,6 +38,15 @@ submissionSchema.index({ status: 1, createdAt: -1 });
 submissionSchema.index({ sessionId: 1, createdAt: -1 });
 submissionSchema.index({ userId: 1, status: 1, topic: 1, createdAt: -1 });
 submissionSchema.index({ status: 1, topic: 1, createdAt: -1 });
-submissionSchema.index({ userId: 1, idempotencyKey: 1 }, { unique: true, sparse: true });
+// Partial (not sparse) index: a compound sparse index still indexes docs that have userId but no
+// idempotencyKey (as null), which made every user's 2nd key-less submission fail with E11000.
+submissionSchema.index(
+  { userId: 1, idempotencyKey: 1 },
+  {
+    unique: true,
+    name: "userId_1_idempotencyKey_1_partial",
+    partialFilterExpression: { idempotencyKey: { $type: "string" } }
+  }
+);
 
 module.exports = mongoose.model("Submission", submissionSchema);

@@ -118,6 +118,35 @@ describe("Timed tests integration", () => {
     expect(audits[1].action).toBe("FORCED_AUTO_SUBMIT");
   });
 
+  test("concurrent violation reports are not lost (atomic $inc)", async () => {
+    const token = await signupStudent();
+    await createMcqQuestion();
+
+    const startResponse = await request(app)
+      .post("/api/tests/start")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ count: 1, type: "mcq", durationMinutes: 30 });
+
+    const sessionId = startResponse.body.session.id;
+
+    const responses = await Promise.all(
+      [1, 2, 3].map(() =>
+        request(app)
+          .post(`/api/tests/${sessionId}/violation`)
+          .set("Authorization", `Bearer ${token}`)
+          .send({ reason: "blur" })
+      )
+    );
+
+    const session = await request(app)
+      .get(`/api/tests/${sessionId}`)
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(session.body.session.status).toBe("AUTO_SUBMITTED");
+    expect(session.body.session.violationCount).toBeGreaterThanOrEqual(2);
+    expect(responses.some((r) => r.body.status === "AUTO_SUBMITTED")).toBe(true);
+  });
+
   test("submits timed test and stores evaluated submissions", async () => {
     const token = await signupStudent();
     await createMcqQuestion();

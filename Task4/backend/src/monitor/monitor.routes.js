@@ -5,6 +5,9 @@ const { workerConcurrency } = require("../shared/config");
 const { getApiLatencySnapshot } = require("../shared/runtimeMetrics");
 const { getWorkerTelemetrySnapshot } = require("../shared/workerTelemetry");
 const { getSubmissionQueue, getDeadLetterQueue } = require("../evaluation/queue");
+const { getMultiTierCacheMetrics } = require("../shared/summaryCache");
+const { getDockerCircuitBreakerStatus } = require("../evaluation/dockerRunner");
+const { compilationCache } = require("../evaluation/compilationCache");
 
 const router = express.Router();
 
@@ -34,7 +37,10 @@ router.get("/dashboard", requireAuth, requireRole("admin"), async (req, res) => 
         deadLetter: Number(deadLetterCount || 0),
         expectedQueueWaitSec
       },
-      worker
+      worker,
+      cache: getMultiTierCacheMetrics(),
+      circuitBreaker: getDockerCircuitBreakerStatus(),
+      compilationCache: compilationCache.getMetrics()
     });
   } catch (err) {
     return res.status(500).json({ error: err.message });

@@ -11,10 +11,17 @@ const {
   invalidateAdminOverview,
   invalidateSubmissionListCacheForUser
 } = require("../shared/summaryCache");
+const { createTokenBucketLimiter } = require("../shared/middleware/rateLimiter");
 const logger = require("../shared/logger");
 
 const router = express.Router();
 const AUTO_SUBMIT_VIOLATION_LIMIT = 2;
+
+const sampleRunRateLimiter = createTokenBucketLimiter({
+  name: "sample-runs",
+  capacity: 6,
+  refillRatePerSec: 0.5
+});
 
 function sanitizeQuestionForStudent(questionDoc) {
   if (!questionDoc) {
@@ -317,12 +324,31 @@ router.post("/:sessionId/violation", requireAuth, async (req, res) => {
     }
 
     const reason = String(req.body?.reason || "Anti-cheat violation detected.").trim();
-    session.violationCount += 1;
-    if (session.violationCount >= AUTO_SUBMIT_VIOLATION_LIMIT) {
-      session.status = "AUTO_SUBMITTED";
+
+    // Atomic increment: concurrent violation reports (e.g. blur + visibilitychange firing together)
+    // must not overwrite each other the way a read-modify-write + save() does.
+    const incremented = await TestSession.findOneAndUpdate(
+      { _id: session._id, userId: req.user.userId, status: "ACTIVE" },
+      { $inc: { violationCount: 1 } },
+      { new: true }
+    );
+
+    if (!incremented) {
+      const latest = await TestSession.findById(session._id).select({ status: 1 }).lean();
+      return res.status(409).json({ error: `Session already ${String(latest?.status || "closed").toLowerCase()}` });
     }
 
-    await session.save();
+    if (incremented.violationCount >= AUTO_SUBMIT_VIOLATION_LIMIT) {
+      // Conditional transition so only one request flips ACTIVE -> AUTO_SUBMITTED.
+      await TestSession.updateOne(
+        { _id: session._id, status: "ACTIVE" },
+        { $set: { status: "AUTO_SUBMITTED" } }
+      );
+      incremented.status = "AUTO_SUBMITTED";
+    }
+
+    session.violationCount = incremented.violationCount;
+    session.status = incremented.status;
 
     const action =
       session.status === "AUTO_SUBMITTED"
@@ -360,7 +386,7 @@ router.post("/:sessionId/violation", requireAuth, async (req, res) => {
   }
 });
 
-router.post("/:sessionId/run-sample", requireAuth, async (req, res) => {
+router.post("/:sessionId/run-sample", requireAuth, sampleRunRateLimiter, async (req, res) => {
   try {
     if (!isValidObjectId(req.params.sessionId)) {
       return res.status(400).json({ error: "Invalid sessionId" });
@@ -631,9 +657,11 @@ router.post("/:sessionId/submit", requireAuth, async (req, res) => {
       }));
 
       await Submission.bulkWrite(writes, { ordered: false });
-      invalidateStudentSummary(req.user.userId);
-      invalidateAdminOverview();
-      invalidateSubmissionListCacheForUser(req.user.userId);
+      await Promise.all([
+        invalidateStudentSummary(req.user.userId),
+        invalidateAdminOverview(),
+        invalidateSubmissionListCacheForUser(req.user.userId)
+      ]);
     }
 
     const passedCount = results.filter((result) => result.passed).length;

@@ -89,4 +89,28 @@ describe("Submission API integration", () => {
     const submissionCount = await Submission.countDocuments();
     expect(submissionCount).toBe(1);
   });
+
+  test("allows multiple submissions without an idempotency key (regression: sparse compound index)", async () => {
+    await Submission.init(); // make sure the unique index exists before inserting
+    const token = await signupStudent();
+
+    const question = await Question.create({
+      title: "Repeat MCQ",
+      description: "Select answer",
+      type: "mcq",
+      topic: "Graphs",
+      difficulty: "easy",
+      choices: ["A", "B"],
+      correctAnswer: "A",
+      isActive: true
+    });
+
+    const body = { questionId: String(question._id), answer: "B" };
+    const first = await request(app).post("/api/submissions").set("Authorization", `Bearer ${token}`).send(body);
+    const second = await request(app).post("/api/submissions").set("Authorization", `Bearer ${token}`).send(body);
+
+    expect(first.statusCode).toBe(202);
+    expect(second.statusCode).toBe(202);
+    expect(await Submission.countDocuments()).toBe(2);
+  });
 });

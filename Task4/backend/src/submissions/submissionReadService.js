@@ -397,7 +397,7 @@ async function getSubmissionListWithCache({ role, userId, page, limit, type, byp
   });
 
   if (!bypassCache) {
-    const cached = getCached(cacheKey);
+    const cached = await getCached(cacheKey);
     if (cached) {
       return {
         payload: cached,

@@ -6,6 +6,7 @@ let mongoServer;
 async function connectTestDb() {
   process.env.JWT_SECRET = process.env.JWT_SECRET || "test-secret-key";
   process.env.JWT_EXPIRES_IN = "1h";
+  process.env.ADMIN_SIGNUP_KEY = process.env.ADMIN_SIGNUP_KEY || "team27";
 
   mongoServer = await MongoMemoryServer.create();
   const uri = mongoServer.getUri();
@@ -18,6 +19,13 @@ async function clearTestDb() {
 }
 
 async function disconnectTestDb() {
+  // Routes like /monitor and /leaderboard open the shared Redis connection; leaving it open
+  // keeps Jest alive forever after the tests pass.
+  const redisConnection = require("../../src/shared/redis");
+  if (!["wait", "end"].includes(redisConnection.status)) {
+    await redisConnection.quit().catch(() => redisConnection.disconnect());
+  }
+
   await mongoose.disconnect();
   if (mongoServer) {
     await mongoServer.stop();

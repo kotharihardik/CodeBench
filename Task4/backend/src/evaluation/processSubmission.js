@@ -1,6 +1,7 @@
 const Submission = require("../models/Submission");
 const Question = require("../models/Question");
 const { createEvaluationStrategy } = require("./strategyFactory");
+const { publishSubmissionProgress } = require("./streamService");
 const {
   invalidateStudentSummary,
   invalidateAdminOverview,
@@ -8,9 +9,11 @@ const {
 } = require("../shared/summaryCache");
 
 function invalidateReadCachesForUser(userId) {
-  invalidateStudentSummary(userId);
-  invalidateAdminOverview();
-  invalidateSubmissionListCacheForUser(userId);
+  return Promise.all([
+    invalidateStudentSummary(userId),
+    invalidateAdminOverview(),
+    invalidateSubmissionListCacheForUser(userId)
+  ]);
 }
 
 async function processSubmission(submissionId, options = {}) {
@@ -32,6 +35,10 @@ async function processSubmission(submissionId, options = {}) {
       new: true
     }
   );
+
+  if (submission) {
+    void publishSubmissionProgress(submissionId, { status: "RUNNING", event: "STARTED" });
+  }
 
   if (!submission) {
     const existing = await Submission.findById(submissionId).lean();
@@ -55,7 +62,7 @@ async function processSubmission(submissionId, options = {}) {
     submission.processedAt = new Date();
     submission.evaluationDurationMs = Date.now() - evaluationStartAt;
     await submission.save();
-    invalidateReadCachesForUser(submission.userId);
+    await invalidateReadCachesForUser(submission.userId);
     return {
       skipped: false,
       status: submission.status,
@@ -78,14 +85,25 @@ async function processSubmission(submissionId, options = {}) {
     submission.processedAt = new Date();
     submission.evaluationDurationMs = Date.now() - evaluationStartAt;
     await submission.save();
-    invalidateReadCachesForUser(submission.userId);
+    await invalidateReadCachesForUser(submission.userId);
+    void publishSubmissionProgress(submissionId, {
+      status: "COMPLETED",
+      event: "FINISHED",
+      score: submission.score,
+      passed: submission.passed
+    });
   } catch (err) {
     submission.status = "FAILED";
     submission.output.stderr = err.message;
     submission.processedAt = new Date();
     submission.evaluationDurationMs = Date.now() - evaluationStartAt;
     await submission.save();
-    invalidateReadCachesForUser(submission.userId);
+    await invalidateReadCachesForUser(submission.userId);
+    void publishSubmissionProgress(submissionId, {
+      status: "FAILED",
+      event: "FINISHED",
+      error: err.message
+    });
   }
 
   return {

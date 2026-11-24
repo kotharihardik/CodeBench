@@ -1,4 +1,5 @@
 const { runCodeInDocker } = require("../dockerRunner");
+const { publishSubmissionProgress } = require("../streamService");
 
 function normalizeOutput(text) {
   return String(text || "").trim().replace(/\r\n/g, "\n");
@@ -44,7 +45,18 @@ class CodeStrategy {
     const caseResults = [];
     let passCount = 0;
 
-    for (const testCase of testCases) {
+    for (let i = 0; i < testCases.length; i += 1) {
+      const testCase = testCases[i];
+      const caseStartAt = Date.now();
+
+      if (submission._id) {
+        void publishSubmissionProgress(submission._id, {
+          event: "TEST_CASE_START",
+          testCaseIndex: i + 1,
+          totalTestCases: testCases.length
+        });
+      }
+
       const runResult = await runCodeInDocker(
         submission.language,
         submission.code,
@@ -53,9 +65,20 @@ class CodeStrategy {
       const actual = normalizeOutput(runResult.stdout);
       const expected = normalizeOutput(testCase.expectedOutput);
       const passed = runResult.exitCode === 0 && actual === expected;
+      const durationMs = Date.now() - caseStartAt;
 
       if (passed) {
         passCount += 1;
+      }
+
+      if (submission._id) {
+        void publishSubmissionProgress(submission._id, {
+          event: "TEST_CASE_RESULT",
+          testCaseIndex: i + 1,
+          totalTestCases: testCases.length,
+          passed,
+          durationMs
+        });
       }
 
       caseResults.push({
