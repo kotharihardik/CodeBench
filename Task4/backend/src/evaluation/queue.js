@@ -43,7 +43,18 @@ function getDeadLetterQueue() {
   return deadLetterQueue;
 }
 
+async function closeQueues() {
+  const queues = [submissionQueue, deadLetterQueue].filter(Boolean);
+  const results = await Promise.allSettled(queues.map((queue) => queue.close()));
+  const failure = results.find((result) => result.status === "rejected");
+
+  if (failure) {
+    throw failure.reason;
+  }
+}
+
 module.exports = {
   getSubmissionQueue,
-  getDeadLetterQueue
+  getDeadLetterQueue,
+  closeQueues
 };
