@@ -146,6 +146,10 @@ app.get("/health", async (req, res) => {
 });
 
 app.get("/health/ready", async (req, res) => {
+  if (app.locals.shuttingDown) {
+    return res.status(503).json({ ready: false, status: "shutting_down" });
+  }
+
   const health = await buildHealthSnapshot();
 
   if (!health.ready) {

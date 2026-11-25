@@ -1,7 +1,24 @@
 const { CircuitBreaker, CircuitBreakerOpenError } = require("../src/shared/circuitBreaker");
 const MultiTierCache = require("../src/shared/cache/multiTierCache");
+const request = require("supertest");
+const app = require("../src/app");
 
 describe("Distributed System Patterns Unit Tests", () => {
+  afterEach(() => {
+    delete app.locals.shuttingDown;
+  });
+
+  test("readiness probe rejects new traffic while the API is draining", async () => {
+    app.locals.shuttingDown = true;
+
+    const readiness = await request(app).get("/health/ready");
+    const liveness = await request(app).get("/health/live");
+
+    expect(readiness.status).toBe(503);
+    expect(readiness.body).toEqual({ ready: false, status: "shutting_down" });
+    expect(liveness.status).toBe(200);
+  });
+
   describe("Circuit Breaker Pattern", () => {
     test("starts in CLOSED state and passes normal executions", async () => {
       const breaker = new CircuitBreaker("test-service", { failureThreshold: 2 });
@@ -127,4 +144,3 @@ describe("Distributed System Patterns Unit Tests", () => {
     });
   });
 });
-
