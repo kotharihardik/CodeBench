@@ -34,6 +34,7 @@ module.exports = {
   workerConcurrency: toNumber(process.env.WORKER_CONCURRENCY, 2),
   workerHeartbeatIntervalMs: toNumber(process.env.WORKER_HEARTBEAT_INTERVAL_MS, 5000),
   workerReadyStaleMs: toNumber(process.env.WORKER_READY_STALE_MS, 30000),
+  shutdownTimeoutMs: toNumber(process.env.SHUTDOWN_TIMEOUT_MS, 10000),
   dockerTimeoutSec: toNumber(process.env.DOCKER_TIMEOUT_SEC, 10),
   dockerPullTimeoutSec: toNumber(process.env.DOCKER_PULL_TIMEOUT_SEC, 45),
   prePullImagesOnWorkerStart: toBoolean(process.env.PRE_PULL_IMAGES_ON_WORKER_START, true),
