@@ -16,6 +16,7 @@ Task 4 is a working prototype with React frontend, Express backend, BullMQ worke
 - Evaluation strategies for code, MCQ and SQL
 - In-memory read cache with warm-up and invalidation
 - Health and monitor endpoints with queue/worker telemetry
+- Readiness-aware graceful shutdown for API and worker processes
 - Backend integration tests for timed tests and user-management guards
 
 ## Quick start
@@ -57,6 +58,14 @@ npm.cmd run dev
 
 - Frontend: http://localhost:5173
 - Backend health: http://localhost:5000/health
+
+## Backend lifecycle
+
+The API and worker handle `SIGINT` and `SIGTERM` by draining in-flight work and closing
+their queue, MongoDB, and Redis connections. During API shutdown, `/health/ready` returns
+`503` so a load balancer can stop routing new traffic; `/health/live` remains available.
+Set `SHUTDOWN_TIMEOUT_MS` to control how long the API waits for open HTTP connections
+before force-closing them (default: `10000`).
 
 ## Data reset
 
