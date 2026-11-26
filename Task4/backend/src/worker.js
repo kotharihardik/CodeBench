@@ -1,4 +1,5 @@
 const { Worker } = require("bullmq");
+const mongoose = require("mongoose");
 const redisConnection = require("./shared/redis");
 const { connectDb } = require("./shared/db");
 const {
@@ -8,7 +9,7 @@ const {
   prePullImagesOnWorkerStart
 } = require("./shared/config");
 const { processSubmission } = require("./evaluation/processSubmission");
-const { getDeadLetterQueue } = require("./evaluation/queue");
+const { getDeadLetterQueue, closeQueues } = require("./evaluation/queue");
 const { prePullDockerImages } = require("./evaluation/dockerRunner");
 const {
   recordWorkerHeartbeat,
@@ -144,18 +145,55 @@ async function startWorker() {
     });
   });
 
-  const shutdown = async (signal) => {
-    clearInterval(heartbeatTimer);
-    await recordWorkerHeartbeat({ status: `stopped:${signal}` });
-    await worker.close();
-    process.exit(0);
+  let shutdownPromise;
+  const runShutdownStep = async (step, operation) => {
+    try {
+      await operation();
+    } catch (err) {
+      process.exitCode = 1;
+      logger.error("worker.shutdown_step_failed", {
+        step,
+        error: err.message
+      });
+    }
   };
 
-  process.on("SIGINT", () => {
+  const shutdown = (signal) => {
+    if (shutdownPromise) {
+      return shutdownPromise;
+    }
+
+    logger.info("worker.shutdown_started", { signal });
+    clearInterval(heartbeatTimer);
+
+    shutdownPromise = (async () => {
+      await runShutdownStep("heartbeat_stopping", () =>
+        recordWorkerHeartbeat({ status: `stopping:${signal}` })
+      );
+      await runShutdownStep("worker", () => worker.close());
+      await runShutdownStep("heartbeat_stopped", () =>
+        recordWorkerHeartbeat({ status: `stopped:${signal}` })
+      );
+      await runShutdownStep("queues", closeQueues);
+      await runShutdownStep("mongo", () => mongoose.disconnect());
+      await runShutdownStep("redis", async () => {
+        if (redisConnection.status === "ready") {
+          await redisConnection.quit();
+        } else {
+          redisConnection.disconnect();
+        }
+      });
+      logger.info("worker.shutdown_completed", { signal });
+    })();
+
+    return shutdownPromise;
+  };
+
+  process.once("SIGINT", () => {
     void shutdown("SIGINT");
   });
 
-  process.on("SIGTERM", () => {
+  process.once("SIGTERM", () => {
     void shutdown("SIGTERM");
   });
 
